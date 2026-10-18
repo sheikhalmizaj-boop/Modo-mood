@@ -310,7 +310,8 @@ $('#keys').addEventListener('click',e=>{const b=e.target.closest('[data-key]');i
 
 async function save(){
   const amt=evalExpr(expr); if(!(amt>0)){toast('اكتب المبلغ أول');return}
-  const d=$('#fDate').value||todayStr(); const note=$('#fNote').value.trim();
+  const d=$('#fDate').value||todayStr(); if(MIN_DATE&&d<MIN_DATE){toast('ما يصير تسجل قبل '+MIN_DATE+'، سجلها بالبرنامج الأول');return}
+  const note=$('#fNote').value.trim();
   const r={d,k:form.k,amt,note,ts:Date.now()};
   if(form.k==='in'){r.src=form.src;r.cashier=form.cashier||'';const a=cfg.apps.find(x=>x.name===form.src);r.fee=a?(+a.fee||0):0}
   if(form.k==='exp'){if(!form.cat.trim()){toast('اكتب اسم البند');return}r.note=form.cat.trim()+(note?' – '+note:'')}
@@ -322,7 +323,9 @@ async function save(){
   try{await db.collection('tx').add(r);expr='';$('#fNote').value='';if(form.k==='exp'){form.cat='';renderFields()}renderDisp();toast('انحفظ ✓')}
   catch(e){toast(e.code==='invalid_argument'?'ما عندك صلاحية تسجيل':'ما انحفظ، جرّب مرة ثانية')}
 }
-function onDate(){const v=$('#fDate').value;const m=v.slice(0,7);if(m&&m!==month){month=m;subscribe()}renderAll()}
+const MIN_DATE='';
+function clampDate(d){return MIN_DATE&&d<MIN_DATE?MIN_DATE:d}
+function onDate(){if(MIN_DATE&&$('#fDate').value<MIN_DATE){$('#fDate').value=MIN_DATE;toast('هذا البرنامج يبدي من '+MIN_DATE)}const v=$('#fDate').value;const m=v.slice(0,7);if(m&&m!==month){month=m;subscribe()}renderAll()}
 $('#fDate').addEventListener('change',onDate);
 document.querySelectorAll('[data-dd]').forEach(b=>b.addEventListener('click',()=>{$('#fDate').value=addDays($('#fDate').value||todayStr(),+b.dataset.dd);onDate()}));
 const DAYN=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
@@ -446,7 +449,7 @@ function renderStaff(){
   let h='<tr><th class="sticky">الموظف</th>'+Array.from({length:n},(_,i)=>`<th class="d num">${i+1}</th>`).join('')+'</tr>';
   for(const e of cfg.emps.filter(e=>!e.off)){const a=am[e.name]||{};
     h+=`<tr><td class="sticky"><b>${esc(e.name)}</b></td>`+Array.from({length:n},(_,i)=>{const c=a[i+1];const has=c!==undefined;
-      return `<td class="c"><button class="${has?'s'+c:''}" data-emp="${esc(e.name)}" data-day="${i+1}" aria-label="${esc(e.name)} يوم ${i+1}">${has?CODES[c]:'·'}</button></td>`}).join('')+'</tr>'}
+      return `<td class="c"><button class="${has?'s'+c:''}" data-emp="${esc(e.name)}" data-day="${i+1}" ${MIN_DATE&&month+'-'+pad(i+1)<MIN_DATE?'disabled style="opacity:.25"':''} aria-label="${esc(e.name)} يوم ${i+1}">${has?CODES[c]:'·'}</button></td>`}).join('')+'</tr>'}
   $('#attTbl').innerHTML=h;
 }
 $('#attTbl').addEventListener('click',async e=>{const b=e.target.closest('[data-emp]');if(!b||!db)return;
@@ -540,7 +543,8 @@ const VIEWS=[['add','تسجيل'],['month','الشهر'],['staff','العمال'
 $('#nav').innerHTML=VIEWS.map(([k,l])=>`<button data-view="${k}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>${l}</button>`).join('');
 $('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b)return;view=b.dataset.view;if(view==='set')draft=null;try{localStorage.setItem('modo.view',view)}catch(_){}renderAll();scrollTo(0,0)});
 function shiftMonth(n){const [y,m]=month.split('-').map(Number);const d=new Date(y,m-1+n,1);month=d.getFullYear()+'-'+pad(d.getMonth()+1);
-  const t=todayStr();$('#fDate').value=t.startsWith(month)?t:month+'-01';subscribe();renderAll()}
+  if(MIN_DATE&&month<MIN_DATE.slice(0,7)){month=MIN_DATE.slice(0,7);toast('هذا البرنامج يبدي من '+MIN_DATE)}
+  const t=todayStr();$('#fDate').value=clampDate(t.startsWith(month)?t:month+'-01');subscribe();renderAll()}
 $('#mPrev').addEventListener('click',()=>shiftMonth(-1));$('#mNext').addEventListener('click',()=>shiftMonth(1));
 
 function renderAll(){
@@ -562,7 +566,7 @@ function subscribe(){
     e=>{$('#status').textContent='انقطع الاتصال'});
   unsubAtt=db.doc('att/'+month).onSnapshot(s=>{att=s.exists?s.data():{};if(view==='staff')renderStaff();if(view==='month')renderMonth()});
 }
-$('#fDate').value=todayStr();
+$('#fDate').value=clampDate(todayStr());if(MIN_DATE){$('#fDate').min=MIN_DATE;if(month<MIN_DATE.slice(0,7))month=MIN_DATE.slice(0,7)}
 try{const v=localStorage.getItem('modo.view');if(v&&VIEWS.some(x=>x[0]===v))view=v}catch(_){}
 renderAll();
 (async()=>{
