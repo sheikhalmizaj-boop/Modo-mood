@@ -33,9 +33,9 @@
   --accent:#3fbf7a; --accent-ink:#0a2015; --char:#0b1f15; --hi:#6fdc9f;
   --in:#4fcf8a; --out:#ef6a62; --warn:#62a3e8; --chip:#253029; color-scheme:dark}
 *{box-sizing:border-box}
-html,body{height:100%}
+html,body{min-height:100%}
 body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;direction:rtl;
-  padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));padding-bottom:84px}
+  padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--char)}
 .num{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
 header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--char);color:#fff;
@@ -135,7 +135,8 @@ img{max-width:100%}
     <div class="types" id="types"></div>
   </div>
   <div class="card" style="display:flex;flex-direction:column;gap:10px">
-    <div class="row"><label for="fDate">التاريخ</label><input type="date" id="fDate" class="grow num"></div>
+    <div class="row"><label for="fDate">التاريخ</label><button class="btn ghost" type="button" data-dd="-1">يوم قبل</button><input type="date" id="fDate" dir="ltr" class="grow"><button class="btn ghost" type="button" data-dd="1">يوم بعد</button></div>
+    <div class="note" id="dateNice" style="text-align:center;margin-top:-4px"></div>
     <div id="fields" style="display:flex;flex-direction:column;gap:10px"></div>
     <div class="row"><label for="fNote">ملاحظة</label><input id="fNote" class="grow" placeholder="اختياري"></div>
     <div class="display"><div class="expr num" id="expr"></div><div class="tot num" id="tot">0</div></div>
@@ -170,7 +171,7 @@ img{max-width:100%}
 <!-- الإعدادات -->
 <section id="v-set" hidden>
   <div class="card"><h3>اسم المطعم</h3><input id="sName" style="width:100%"></div>
-  <div class="card"><h3>الشركاء والنسب %</h3><div id="sPartners"></div><button class="btn ghost" data-add="partners">+ شريك</button></div>
+  <div class="card"><h3>الشركاء والنسب %</h3><p class="note">كل ما يدخل شريك جديد أو تتغير النسب، سوّي فترة جديدة بتاريخها. الربح قبل التاريخ يتوزع بالنسب القديمة، ومن التاريخ وبعد بالجديدة.</p><div id="sPartners"></div><button class="btn ghost" id="addPeriod">+ شريك جديد / تغيير النسب</button></div>
   <div class="card"><h3>التطبيقات والعمولة %</h3><div id="sApps"></div><button class="btn ghost" data-add="apps">+ تطبيق</button></div>
   <div class="card"><h3>الكاشيرية</h3><div id="sCash"></div><button class="btn ghost" data-add="cashiers">+ كاشير</button></div>
   <div class="card"><h3>الموظفين</h3><div id="sEmps"></div><button class="btn ghost" data-add="emps">+ موظف</button>
@@ -179,7 +180,11 @@ img{max-width:100%}
   <div class="card"><h3>نسخة احتياطية</h3>
     <p class="note">البيانات محفوظة على هذا الموبايل بس. اضغط "حفظ نسخة احتياطية" كل أسبوع، وتطلع قائمة المشاركة: اختار "حفظ في الملفات" أو أرسلها لنفسك بالواتساب. إذا تبدل الموبايل أو تنمسح البيانات، ترجعها من زر الاستيراد.</p>
     <div class="row"><button class="btn ghost" id="backupBtn">حفظ نسخة احتياطية</button><label class="btn ghost" for="restoreIn" style="cursor:pointer">استيراد نسخة</label><input type="file" id="restoreIn" accept=".json,application/json" hidden></div>
-    <p class="note" id="lastBackup"></p></div>
+    <p class="note" id="lastBackup"></p>
+    <h3 style="margin-top:10px">استيراد من رابط</h3>
+    <p class="note">إذا عندك رابط استيراد (مثل رابط بيانات شهر 9)، انسخه والصقه هنا واضغط استيراد.</p>
+    <textarea id="importTxt" rows="3" style="width:100%;font:inherit;font-size:12px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px" placeholder="الصق الرابط هنا" dir="ltr"></textarea>
+    <div class="row" style="margin-top:6px"><button class="btn" id="importGo">استيراد</button><button class="btn ghost" id="importPaste">لصق واستيراد</button></div></div>
 </section>
 </main>
 
@@ -194,7 +199,10 @@ const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),1800)}
 
-const DEFAULT_CFG={name:'مودو برجر',partners:[{name:'انس',pct:100}],apps:[{name:'طلباتي',fee:25}],cashiers:['كاشير 1','كاشير 2'],emps:[]};
+const DEFAULT_CFG={name:'مودو برجر',partners:[{name:'انس',pct:100}],shares:[{from:'2026-09-01',parts:[{name:'انس',pct:100}]}],apps:[{name:'طلباتي',fee:25},{name:'توترز',fee:20},{name:'بلي',fee:26},{name:'وادي',fee:25},{name:'صقور كركوك',fee:0}],cashiers:['كاشير 1','كاشير 2'],emps:[]};
+function getShares(c=cfg){const s=(c.shares&&c.shares.length)?c.shares:[{from:'2000-01-01',parts:c.partners||[]}];return s.slice().sort((a,b)=>a.from<b.from?-1:1)}
+function partnerNames(c=cfg){return uniq(getShares(c).flatMap(p=>p.parts.map(x=>x.name)))}
+function addDays(d,n){const [y,m,dd]=d.split('-').map(Number);const t=new Date(y,m-1,dd+n);return t.getFullYear()+'-'+pad(t.getMonth()+1)+'-'+pad(t.getDate())}
 let cfg=structuredClone(DEFAULT_CFG), txs=[], att={}, db=null, canWrite=true;
 let month=todayStr().slice(0,7), view='add';
 let unsubTx=null, unsubAtt=null;
@@ -259,7 +267,7 @@ function renderFields(){
     f.push(`<div class="row"><label>النوع</label>${chipGroup('g4',EMP_SUBS,form.sub,'sub')}</div>`);
   }
   if(k==='partner'){
-    const names=cfg.partners.map(p=>p.name).filter(Boolean); if(!names.includes(form.who)) form.who=names[0]||'';
+    const names=partnerNames(); if(!names.includes(form.who)) form.who=names[0]||'';
     f.push(`<div class="row"><label>الشريك</label>${chipGroup('g5',names,form.who,'who')}</div>`);
     f.push(`<div class="row"><label>النوع</label>${chipGroup('g6',['عليه','له'],form.dir,'dir')}</div>`);
     f.push(`<p class="note">"عليه": أخذ فلوس أو أوردر من المطعم، تنخصم من حصته. "له": حط فلوس بالمطعم، تنضاف لحصته.</p>`);
@@ -296,7 +304,11 @@ async function save(){
   try{await db.collection('tx').add(r);expr='';$('#fNote').value='';if(form.k==='exp'){form.cat='';renderFields()}renderDisp();toast('انحفظ ✓')}
   catch(e){toast(e.code==='invalid_argument'?'ما عندك صلاحية تسجيل':'ما انحفظ، جرّب مرة ثانية')}
 }
-$('#fDate').addEventListener('change',e=>{const m=e.target.value.slice(0,7);if(m&&m!==month){month=m;subscribe()}renderAll()});
+function onDate(){const v=$('#fDate').value;const m=v.slice(0,7);if(m&&m!==month){month=m;subscribe()}renderAll()}
+$('#fDate').addEventListener('change',onDate);
+document.querySelectorAll('[data-dd]').forEach(b=>b.addEventListener('click',()=>{$('#fDate').value=addDays($('#fDate').value||todayStr(),+b.dataset.dd);onDate()}));
+const DAYN=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+function niceDate(d){const [y,m,dd]=d.split('-').map(Number);const t=new Date(y,m-1,dd);return DAYN[t.getDay()]+' '+dd+'/'+m+'/'+y+(d===todayStr()?' (اليوم)':'')}
 
 /* ---------- describe ---------- */
 function desc(t){
@@ -311,6 +323,7 @@ function desc(t){
 }
 function renderDay(){
   const d=$('#fDate').value||todayStr();
+  $('#dateNice').textContent=niceDate(d);
   const list=txs.filter(t=>t.d===d).sort((a,b)=>(b.ts||0)-(a.ts||0));
   const net=list.reduce((s,t)=>s+(t.k==='in'?t.amt*(1-(t.fee||0)/100):0),0);
   const out=list.reduce((s,t)=>s+(t.k==='exp'||t.k==='loss'||t.k==='debt'?t.amt:0),0);
@@ -358,6 +371,18 @@ function totals(){
   T.partnerOn=Object.values(T.pOn).reduce((a,b)=>a+b,0);
   T.sal=T.paid+T.draw;
   T.profit=T.net+T.partnerOn-T.exp-T.sal-T.loss-T.debt;
+  // profit per share period
+  const sh=getShares(),mStart=month+'-01',mEnd=month+'-'+pad(daysIn(month));
+  T.periods=[];
+  sh.forEach((p,i)=>{const nx=sh[i+1];const a=p.from>mStart?p.from:mStart;const b0=nx?addDays(nx.from,-1):mEnd;const b=b0<mEnd?b0:mEnd;
+    if(a>b)return;let pr=0;
+    for(const t of txs){if(t.d<a||t.d>b)continue;
+      if(t.k==='in')pr+=t.amt*(1-(t.fee||0)/100);
+      else if(t.k==='partner'){if(t.dir!=='له')pr+=t.amt}
+      else if(t.k==='exp'||t.k==='loss'||t.k==='debt'||(t.k==='emp'&&(t.sub==='دفع راتب'||t.sub==='سحب')))pr-=t.amt}
+    T.periods.push({a,b,profit:pr,parts:p.parts})});
+  if(!T.periods.length)T.periods.push({a:mStart,b:mEnd,profit:T.profit,parts:[]});
+  T.shareOf={};for(const P of T.periods)for(const x of P.parts)T.shareOf[x.name]=(T.shareOf[x.name]||0)+P.profit*(+x.pct||0)/100;
   return T;
 }
 const kv=(k,v,cls='')=>`<div class="kv ${cls}"><span>${k}</span><span class="num">${v}</span></div>`;
@@ -373,9 +398,14 @@ function renderMonth(){
     kv('خسائر (إلغاء/تعويض/ضيافة)',fmt(T.loss))+kv('تسديد ديون',fmt(T.debt))+
     kv('المجموع',fmt(T.exp+T.sal+T.loss+T.debt),'big')+
     `<p class="note">رواتب بعدها ما انطت: <b class="num">${fmt(left)}</b> — ما تنحسب بالربح لحد ما تندفع.</p>`;
-  $('#partBox').innerHTML=cfg.partners.filter(p=>p.name).map(p=>{const sh=T.profit*(+p.pct||0)/100,on=T.pOn[p.name]||0,fo=T.pFor[p.name]||0;
-    return `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${esc(p.name)}</b> <span class="tag num">${+p.pct||0}%</span>`+
-      kv('حصته من الربح',fmt(sh))+kv('أخذ (عليه)',fmt(on))+kv('حط (له)',fmt(fo))+kv('الباقي إله',fmt(sh-on+fo),'big')+'</div>'}).join('');
+  const per=T.periods.map(P=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="note">من <span class="num">${P.a.slice(5)}</span> إلى <span class="num">${P.b.slice(5)}</span> · ربح الفترة <b class="num">${fmt(P.profit)}</b></div>`+
+    P.parts.map(x=>kv(esc(x.name)+` <span class="tag num">${+x.pct||0}%</span>`,fmt(P.profit*(+x.pct||0)/100))).join('')+'</div>').join('');
+  const names=uniq([...T.periods.flatMap(P=>P.parts.map(x=>x.name)),...Object.keys(T.pOn),...Object.keys(T.pFor)]);
+  $('#partBox').innerHTML=(T.periods.length>1?'<h3 style="margin-top:4px">حسب فترة كل شراكة</h3>'+per+'<h3 style="margin-top:12px">المجموع لكل شريك</h3>':'')+
+    names.map(n=>{const sh=T.shareOf[n]||0,on=T.pOn[n]||0,fo=T.pFor[n]||0;
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${esc(n)}</b>`+
+      kv('حصته من الربح',fmt(sh))+kv('أخذ (عليه)',fmt(on))+kv('حط (له)',fmt(fo))+kv('الباقي إله',fmt(sh-on+fo),'big')+'</div>'}).join('')+
+    (T.periods.length===1&&T.periods[0].parts.length?`<p class="note">النسب: ${T.periods[0].parts.map(x=>esc(x.name)+' '+(+x.pct||0)+'%').join('، ')}</p>`:'');
   // days table
   const n=daysIn(month);let h='<tr><th>اليوم</th><th>وارد صافي</th><th>مصاريف</th><th>صافي</th></tr>';
   for(let i=1;i<=n;i++){const d=month+'-'+pad(i);let inn=0,ex=0;
@@ -410,8 +440,11 @@ let draft=null;
 function renderSet(){
   draft=draft||structuredClone(cfg);
   $('#sName').value=draft.name||'';
-  $('#sPartners').innerHTML=draft.partners.map((p,i)=>`<div class="row" style="margin-bottom:6px"><input class="grow" data-f="partners.${i}.name" value="${esc(p.name)}" placeholder="الاسم"><input style="width:80px" class="num" inputmode="decimal" data-f="partners.${i}.pct" value="${p.pct??''}"><button class="x btn ghost" data-rm="partners.${i}">×</button></div>`).join('')+
-    `<p class="note">مجموع النسب: <b class="num">${draft.partners.reduce((a,p)=>a+(+p.pct||0),0)}%</b> (لازم 100)</p>`;
+  if(!draft.shares||!draft.shares.length)draft.shares=getShares(draft).map(x=>structuredClone(x));
+  $('#sPartners').innerHTML=draft.shares.map((P,i)=>`<div style="padding:8px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px">
+    <div class="row"><label>من تاريخ</label><input type="date" dir="ltr" data-f="shares.${i}.from" value="${esc(P.from)}" class="grow">${draft.shares.length>1?`<button class="btn ghost" data-rm="shares.${i}">حذف الفترة</button>`:''}</div>
+    ${P.parts.map((p,j)=>`<div class="row"><input class="grow" data-f="shares.${i}.parts.${j}.name" value="${esc(p.name)}" placeholder="اسم الشريك"><input style="width:72px" class="num" inputmode="decimal" data-f="shares.${i}.parts.${j}.pct" value="${p.pct??''}"><span>%</span><button class="x btn ghost" data-rm="shares.${i}.parts.${j}">×</button></div>`).join('')}
+    <div class="row"><button class="btn ghost" data-addpart="${i}">+ شريك بهاي الفترة</button><span class="note" data-sum="${i}">المجموع: <b class="num">${P.parts.reduce((a,p)=>a+(+p.pct||0),0)}%</b> (لازم 100)</span></div></div>`).join('');
   $('#sApps').innerHTML=draft.apps.map((p,i)=>`<div class="row" style="margin-bottom:6px"><input class="grow" data-f="apps.${i}.name" value="${esc(p.name)}" placeholder="اسم التطبيق"><input style="width:80px" class="num" inputmode="decimal" data-f="apps.${i}.fee" value="${p.fee??''}"><button class="x btn ghost" data-rm="apps.${i}">×</button></div>`).join('');
   $('#sCash').innerHTML=draft.cashiers.map((c,i)=>`<div class="row" style="margin-bottom:6px"><input class="grow" data-f="cashiers.${i}" value="${esc(c)}"><button class="x btn ghost" data-rm="cashiers.${i}">×</button></div>`).join('');
   $('#sEmps').innerHTML=draft.emps.map((e,i)=>{const h=(e.hist||[]).slice().sort((a,b)=>a.from<b.from?-1:1);
@@ -423,18 +456,23 @@ function renderSet(){
 }
 function setPath(o,p,v){const k=p.split('.');let x=o;for(let i=0;i<k.length-1;i++)x=x[k[i]];x[k.at(-1)]=v}
 $('#v-set').addEventListener('input',e=>{const f=e.target.dataset.f;if(!f)return;let v=e.target.value;if(/\.(pct|fee)$/.test(f))v=+v||0;setPath(draft,f,v);if(/pct/.test(f))renderSetPct()});
+$('#v-set').addEventListener('change',e=>{const f=e.target.dataset.f;if(f&&/^shares\.\d+\.from$/.test(f)){setPath(draft,f,e.target.value)}});
 $('#v-set').addEventListener('change',e=>{const f=e.target.dataset.f;if(f&&e.target.tagName==='SELECT')setPath(draft,f,e.target.value)});
-function renderSetPct(){const p=$('#sPartners .note b');if(p)p.textContent=draft.partners.reduce((a,p)=>a+(+p.pct||0),0)+'%'}
+function renderSetPct(){draft.shares.forEach((P,i)=>{const b=document.querySelector(`[data-sum="${i}"] b`);if(b)b.textContent=P.parts.reduce((a,p)=>a+(+p.pct||0),0)+'%'})}
 $('#sName').addEventListener('input',e=>draft.name=e.target.value);
 $('#v-set').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.add){const k=t.dataset.add;draft[k].push(k==='partners'?{name:'',pct:0}:k==='apps'?{name:'',fee:0}:k==='cashiers'?'':{name:'',pay:'شهري',hist:[]});renderSet()}
-  if(t.dataset.rm){const [k,i]=t.dataset.rm.split('.');draft[k].splice(+i,1);renderSet()}
+  if(t.dataset.rm){const ps=t.dataset.rm.split('.');const i=+ps.pop();let arr=draft;for(const k of ps)arr=arr[k];arr.splice(i,1);renderSet()}
+  if(t.dataset.addpart){draft.shares[+t.dataset.addpart].parts.push({name:'',pct:0});renderSet()}
+  if(t.id==='addPeriod'){const last=draft.shares[draft.shares.length-1];draft.shares.push({from:todayStr(),parts:structuredClone(last?last.parts:[]).concat([{name:'',pct:0}])});renderSet();toast('غيّر التاريخ والأسماء والنسب، وبعدين احفظ')}
   if(t.dataset.off){const e2=draft.emps[+t.dataset.off];e2.off=!e2.off;renderSet()}
   if(t.dataset.chg){const i=+t.dataset.chg;const s=+$('#ns'+i).value,d=$('#nd'+i).value;if(!(s>0)||!d){toast('اكتب الراتب والتاريخ');return}
     const h=draft.emps[i].hist||(draft.emps[i].hist=[]);const ex=h.find(x=>x.from===d);if(ex)ex.salary=s;else h.push({from:d,salary:s});renderSet();toast('اضغط حفظ الإعدادات')}
 });
 $('#saveSet').addEventListener('click',async()=>{if(!db)return;
-  draft.cashiers=draft.cashiers.filter(Boolean);draft.apps=draft.apps.filter(a=>a.name);draft.partners=draft.partners.filter(p=>p.name);draft.emps=draft.emps.filter(e=>e.name);
+  draft.cashiers=draft.cashiers.filter(Boolean);draft.apps=draft.apps.filter(a=>a.name);draft.shares=draft.shares.map(P=>({from:P.from||todayStr(),parts:P.parts.filter(p=>p.name)})).sort((a,b)=>a.from<b.from?-1:1);
+  for(const P of draft.shares){const sum=P.parts.reduce((a,p)=>a+(+p.pct||0),0);if(Math.round(sum)!==100){toast('مجموع النسب من '+P.from+' لازم يكون 100%');return}}
+  draft.partners=draft.shares[draft.shares.length-1].parts;draft.emps=draft.emps.filter(e=>e.name);
   try{await db.doc('cfg/main').set(draft);toast('انحفظت الإعدادات ✓')}catch(e){toast('ما انحفظت')}});
 
 /* ---------- export ---------- */
@@ -455,12 +493,14 @@ $('#backupBtn').addEventListener('click',async()=>{const d=todayStr();const name
   catch(e){if(e&&e.name==='AbortError')return;saveBlob(name,blob)}
   try{localStorage.setItem('modo.lastBackup',d)}catch(_){}showLastBackup()});
 function mergeDocs(docs){let n=0;for(const [k,v] of Object.entries(docs)){if(!(k in STORE.docs))n++;STORE.docs[k]=v}persist();notify();draft=null;renderAll();return n}
-(async()=>{const h=location.hash;if(!h.startsWith('#import='))return;
-  try{const b64=h.slice(8).replace(/-/g,'+').replace(/_/g,'/');const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+async function importCode(code){const i=code.indexOf('#import=');if(i<0)throw 0;const b64=code.slice(i+8).trim().replace(/-/g,'+').replace(/_/g,'/');const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
     const txt=await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
     const j=JSON.parse(txt);if(j.app!=='modo'||!j.docs)throw 0;const n=mergeDocs(j.docs);toast('انضافت بيانات '+(j.label||'')+' ✓ ('+n+' سجل)')}
-  catch(_){toast('رابط الاستيراد ما اشتغل')}
+(async()=>{const h=location.hash;if(!h.startsWith('#import='))return;
+  try{await importCode(h)}catch(_){toast('رابط الاستيراد ما اشتغل')}
   history.replaceState(null,'',location.pathname)})();
+$('#importGo').addEventListener('click',async()=>{try{await importCode($('#importTxt').value);$('#importTxt').value=''}catch(_){toast('الرابط مو صحيح، انسخه كامل')}});
+$('#importPaste').addEventListener('click',async()=>{try{const t=await navigator.clipboard.readText();await importCode(t)}catch(_){toast('الصقه بالخانة يدوياً واضغط استيراد')}});
 $('#restoreIn').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
   try{const j=JSON.parse(await f.text());if(j.app!=='modo'||!j.docs)throw 0;const n=mergeDocs(j.docs);toast('انضافت '+n+' سجل ✓')}catch(_){toast('هذا مو ملف نسخة احتياطية صحيح')}
   e.target.value=''});
@@ -499,7 +539,7 @@ try{const v=localStorage.getItem('modo.view');if(v&&VIEWS.some(x=>x[0]===v))view
 renderAll();
 (async()=>{
   db=LocalDB;
-  db.doc('cfg/main').onSnapshot(s=>{if(s.exists){cfg={...DEFAULT_CFG,...s.data()}}if(view!=='set')renderAll();else if(!draft)renderSet();
+  db.doc('cfg/main').onSnapshot(s=>{if(s.exists){const d=s.data();cfg={...DEFAULT_CFG,...d};if(!d.shares)cfg.shares=null}if(view!=='set')renderAll();else if(!draft)renderSet();
     $('h1').innerHTML=esc(cfg.name||'مودو برجر').replace(/^(\S+)\s/,'$1 <b>')+'</b>'});
   subscribe();
 })();
