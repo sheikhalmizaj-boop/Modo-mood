@@ -155,6 +155,7 @@ img{max-width:100%}
   <div class="card"><h3>حسب الكاشير</h3><div id="cashBox"></div></div>
   <div class="card"><h3>المصاريف والخصميات</h3><div id="expBox"></div></div>
   <div class="card"><h3>توزيع الأرباح على الشركاء</h3><div id="partBox"></div></div>
+  <div class="card"><h3>الديون (من البداية لهسه)</h3><div id="debtBox"></div></div>
   <div class="card"><h3>كل يوم</h3><div class="scroll"><table id="daysTbl"></table></div></div>
   <div class="card"><h3>تصدير</h3><p class="note">ينزل ملف CSV يفتح بالإكسل بيه كل حركات هذا الشهر.</p><button class="btn ghost" id="exportBtn">تنزيل حركات الشهر</button></div>
 </section>
@@ -184,7 +185,11 @@ img{max-width:100%}
     <h3 style="margin-top:10px">استيراد من رابط</h3>
     <p class="note">إذا عندك رابط استيراد (مثل رابط بيانات شهر 9)، انسخه والصقه هنا واضغط استيراد.</p>
     <textarea id="importTxt" rows="3" style="width:100%;font:inherit;font-size:12px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px" placeholder="الصق الرابط هنا" dir="ltr"></textarea>
-    <div class="row" style="margin-top:6px"><button class="btn" id="importGo">استيراد</button><button class="btn ghost" id="importPaste">لصق واستيراد</button></div></div>
+    <div class="row" style="margin-top:6px"><button class="btn" id="importGo">استيراد</button><button class="btn ghost" id="importPaste">لصق واستيراد</button></div>
+    <h3 style="margin-top:10px">نقل الإعدادات لبرنامج ثاني</h3>
+    <p class="note">ينسخ رابط بيه الشركاء والتطبيقات والكاشيرية والموظفين ورواتبهم (بدون الحسابات). الصقه بالبرنامج الثاني من "استيراد من رابط".</p>
+    <button class="btn ghost" id="cfgLink">نسخ رابط الإعدادات</button>
+    <textarea id="cfgLinkTxt" rows="2" readonly hidden dir="ltr" style="width:100%;margin-top:6px;font-size:11px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px"></textarea></div>
 </section>
 </main>
 
@@ -236,10 +241,13 @@ function saveBlob(name,blob){const a=document.createElement('a');a.href=URL.crea
 /* ---------- types ---------- */
 const TYPES=[
  {k:'in',label:'وارد'},{k:'exp',label:'مصروف'},{k:'emp',label:'عامل'},
- {k:'partner',label:'شريك'},{k:'loss',label:'خسارة'},{k:'debt',label:'تسديد دين'}];
+ {k:'partner',label:'شريك'},{k:'loss',label:'خسارة'},{k:'debt',label:'ديون'}];
 const EMP_SUBS=['دفع راتب','سحب','اوردر','خصم','مكافأة'];
 const LOSS_SUBS=['إلغاء','تعويض','ضيافة'];
-let form={k:'in',src:'كاش',cashier:'',who:'',sub:'سحب',dir:'عليه',lsub:'إلغاء',cat:''};
+let form={k:'in',src:'كاش',cashier:'',who:'',sub:'سحب',dir:'عليه',lsub:'إلغاء',cat:'',ddir:'تسديد',cred:''};
+function allTx(){return Object.entries(STORE.docs).filter(([k])=>k.startsWith('tx/')).map(([k,v])=>({id:k.slice(3),...v}))}
+function creditors(){return uniq(allTx().filter(t=>t.k==='debt'||t.k==='dnew').map(t=>t.who))}
+function debtBook(){const b={};for(const t of allTx()){if(t.k!=='debt'&&t.k!=='dnew')continue;const w=t.who||'غير محدد';const x=b[w]||(b[w]={owed:0,paid:0});if(t.k==='dnew')x.owed+=t.amt;else x.paid+=t.amt}return b}
 let expr='';
 
 function chipGroup(id,opts,cur,key){
@@ -272,9 +280,18 @@ function renderFields(){
     f.push(`<div class="row"><label>النوع</label>${chipGroup('g6',['عليه','له'],form.dir,'dir')}</div>`);
     f.push(`<p class="note">"عليه": أخذ فلوس أو أوردر من المطعم، تنخصم من حصته. "له": حط فلوس بالمطعم، تنضاف لحصته.</p>`);
   }
+  if(k==='debt'){
+    f.push(`<div class="row"><label>النوع</label>${chipGroup('g8',['تسديد','دين جديد'],form.ddir,'ddir')}</div>`);
+    const cs=creditors();const bk=debtBook();
+    if(cs.length)f.push(`<div class="row"><label>الجهة</label>${chipGroup('g9',cs,form.cred,'cred')}</div>`);
+    f.push(`<div class="row"><label for="fCred">${cs.length?'أو جهة جديدة':'الجهة'}</label><input id="fCred" class="grow" placeholder="مثلاً: مورد اللحم، فلان" value="${cs.includes(form.cred)?'':esc(form.cred)}"></div>`);
+    if(form.cred&&bk[form.cred]){const x=bk[form.cred];f.push(`<p class="note">باقي على المطعم لـ <b>${esc(form.cred)}</b>: <b class="num out">${fmt(x.owed-x.paid)}</b></p>`)}
+    f.push(`<p class="note">"دين جديد": المطعم استدان أو أخذ بضاعة بالدين (ما ينحسب من الربح). "تسديد": دفعت من الدين (ينحسب من الربح).</p>`);
+  }
   if(k==='loss') f.push(`<div class="row"><label>النوع</label>${chipGroup('g7',LOSS_SUBS,form.lsub,'lsub')}</div>`);
   $('#fields').innerHTML=f.join('');
   const c=$('#fCat'); if(c) c.addEventListener('input',e=>form.cat=e.target.value);
+  const cr=$('#fCred'); if(cr) cr.addEventListener('input',e=>{form.cred=e.target.value});
 }
 $('#types').addEventListener('click',e=>{const b=e.target.closest('[data-type]');if(!b)return;form.k=b.dataset.type;renderTypes();renderFields()});
 $('#fields').addEventListener('click',e=>{const b=e.target.closest('[data-k]');if(!b)return;form[b.dataset.k]=b.dataset.v;renderFields()});
@@ -300,6 +317,7 @@ async function save(){
   if(form.k==='emp'){if(!form.who){toast('ضيف الموظفين من الإعدادات');return}r.who=form.who;r.sub=form.sub}
   if(form.k==='partner'){if(!form.who){toast('ضيف الشركاء من الإعدادات');return}r.who=form.who;r.dir=form.dir}
   if(form.k==='loss'){r.sub=form.lsub}
+  if(form.k==='debt'){const w=(form.cred||'').trim();if(!w){toast('اختار أو اكتب اسم الجهة');return}r.who=w;if(form.ddir==='دين جديد')r.k='dnew'}
   if(!db){toast('ما متصل، جرّب بعد شوية');return}
   try{await db.collection('tx').add(r);expr='';$('#fNote').value='';if(form.k==='exp'){form.cat='';renderFields()}renderDisp();toast('انحفظ ✓')}
   catch(e){toast(e.code==='invalid_argument'?'ما عندك صلاحية تسجيل':'ما انحفظ، جرّب مرة ثانية')}
@@ -318,7 +336,8 @@ function desc(t){
     case 'emp':return {title:(t.who||'')+' · '+(t.sub||''),sub:t.note||'',cls:'out'};
     case 'partner':return {title:(t.who||'')+' · '+(t.dir||'عليه'),sub:t.note||'',cls:t.dir==='له'?'in':'out'};
     case 'loss':return {title:'خسارة · '+(t.sub||''),sub:t.note||'',cls:'out'};
-    case 'debt':return {title:'تسديد دين',sub:t.note||'',cls:'out'};
+    case 'debt':return {title:'تسديد دين · '+(t.who||''),sub:t.note||'',cls:'out'};
+    case 'dnew':return {title:'دين جديد · '+(t.who||''),sub:t.note||'ما ينحسب من الربح',cls:''};
   }return {title:t.k,sub:'',cls:''}
 }
 function renderDay(){
@@ -387,6 +406,9 @@ function totals(){
 }
 const kv=(k,v,cls='')=>`<div class="kv ${cls}"><span>${k}</span><span class="num">${v}</span></div>`;
 function renderMonth(){
+  {const bk=debtBook();const ks=Object.keys(bk);let tot=0;
+   $('#debtBox').innerHTML=ks.length?ks.map(w=>{const x=bk[w],r=x.owed-x.paid;tot+=r;return `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${esc(w)}</b>`+kv('الدين',fmt(x.owed))+kv('المسدد',fmt(x.paid))+kv('الباقي',`<span class="${r>0?'out':''}">${fmt(r)}</span>`)+'</div>'}).join('')+kv('مجموع الباقي على المطعم',fmt(tot),'big')
+     :'<div class="empty">ما كو ديون مسجلة. سجّلها من "تسجيل" ← ديون ← دين جديد.</div>'}
   const T=totals();
   $('#netProfit').textContent=fmt(T.profit);
   $('#netNote').textContent=`الوارد الصافي ${fmt(T.net)} + سحوبات الشركاء ${fmt(T.partnerOn)} − المصاريف ${fmt(T.exp)} − الرواتب ${fmt(T.sal)} − الخسائر ${fmt(T.loss)} − الديون ${fmt(T.debt)}`;
@@ -478,7 +500,7 @@ $('#saveSet').addEventListener('click',async()=>{if(!db)return;
 /* ---------- export ---------- */
 $('#exportBtn').addEventListener('click',async()=>{
   const head=['التاريخ','النوع','المصدر/البند','الكاشير','الاسم','التفصيل','المبلغ','العمولة%','الصافي','ملاحظة'];
-  const kn={in:'وارد',exp:'مصروف',emp:'عامل',partner:'شريك',loss:'خسارة',debt:'تسديد دين'};
+  const kn={in:'وارد',exp:'مصروف',emp:'عامل',partner:'شريك',loss:'خسارة',debt:'تسديد دين',dnew:'دين جديد'};
   const rows=txs.slice().sort((a,b)=>a.d<b.d?-1:1).map(t=>[t.d,kn[t.k],t.k==='in'?t.src:t.k==='exp'?t.note:'',t.cashier||'',t.who||'',t.sub||t.dir||'',t.amt,t.fee||'',t.k==='in'?Math.round(t.amt*(1-(t.fee||0)/100)):'',t.k==='exp'?'':t.note||'']);
   const csv='﻿'+[head,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
   saveBlob(`modo-${month}.csv`,new Blob([csv],{type:'text/csv'}))
@@ -499,6 +521,12 @@ async function importCode(code){const i=code.indexOf('#import=');if(i<0)throw 0;
 (async()=>{const h=location.hash;if(!h.startsWith('#import='))return;
   try{await importCode(h)}catch(_){toast('رابط الاستيراد ما اشتغل')}
   history.replaceState(null,'',location.pathname)})();
+$('#cfgLink').addEventListener('click',async()=>{
+  const c=structuredClone(cfg);const raw=new TextEncoder().encode(JSON.stringify({app:'modo',v:1,label:'الإعدادات',docs:{'cfg/main':c}}));
+  const buf=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+  let bin='';buf.forEach(x=>bin+=String.fromCharCode(x));const url=location.origin+location.pathname+'#import='+btoa(bin).replace(/\+/g,'-').replace(/\//g,'_');
+  const ta=$('#cfgLinkTxt');ta.value=url;ta.hidden=false;
+  try{await navigator.clipboard.writeText(url);toast('انسخ ✓ الصقه بالبرنامج الثاني')}catch(_){ta.focus();ta.select();toast('انسخ الرابط من الخانة')}});
 $('#importGo').addEventListener('click',async()=>{try{await importCode($('#importTxt').value);$('#importTxt').value=''}catch(_){toast('الرابط مو صحيح، انسخه كامل')}});
 $('#importPaste').addEventListener('click',async()=>{try{const t=await navigator.clipboard.readText();await importCode(t)}catch(_){toast('الصقه بالخانة يدوياً واضغط استيراد')}});
 $('#restoreIn').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
