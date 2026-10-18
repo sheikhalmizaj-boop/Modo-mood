@@ -323,7 +323,7 @@ async function save(){
   try{await db.collection('tx').add(r);expr='';$('#fNote').value='';if(form.k==='exp'){form.cat='';renderFields()}renderDisp();toast('انحفظ ✓')}
   catch(e){toast(e.code==='invalid_argument'?'ما عندك صلاحية تسجيل':'ما انحفظ، جرّب مرة ثانية')}
 }
-const MIN_DATE='2026-10-18';
+const MIN_DATE='';
 function clampDate(d){return MIN_DATE&&d<MIN_DATE?MIN_DATE:d}
 function onDate(){if(MIN_DATE&&$('#fDate').value<MIN_DATE){$('#fDate').value=MIN_DATE;toast('هذا البرنامج يبدي من '+MIN_DATE)}const v=$('#fDate').value;const m=v.slice(0,7);if(m&&m!==month){month=m;subscribe()}renderAll()}
 $('#fDate').addEventListener('change',onDate);
