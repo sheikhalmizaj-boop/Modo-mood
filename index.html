@@ -176,8 +176,8 @@ img{max-width:100%}
     <p class="note">لتغيير راتب موظف: اكتب الراتب الجديد وتاريخ بدايته واضغط "تغيير". الأيام قبل التاريخ تنحسب بالقديم ومن بعده بالجديد.</p></div>
   <button class="btn" id="saveSet">حفظ الإعدادات</button>
   <div class="card"><h3>نسخة احتياطية</h3>
-    <p class="note">البيانات محفوظة على هذا الموبايل بس. نزّل نسخة احتياطية كل أسبوع واحفظها بالملفات أو أرسلها لنفسك. إذا تبدل الموبايل أو تنمسح البيانات، ترجعها من زر الاستيراد.</p>
-    <div class="row"><button class="btn ghost" id="backupBtn">تنزيل نسخة احتياطية</button><label class="btn ghost" for="restoreIn" style="cursor:pointer">استيراد نسخة</label><input type="file" id="restoreIn" accept=".json,application/json" hidden></div>
+    <p class="note">البيانات محفوظة على هذا الموبايل بس. اضغط "حفظ نسخة احتياطية" كل أسبوع، وتطلع قائمة المشاركة: اختار "حفظ في الملفات" أو أرسلها لنفسك بالواتساب. إذا تبدل الموبايل أو تنمسح البيانات، ترجعها من زر الاستيراد.</p>
+    <div class="row"><button class="btn ghost" id="backupBtn">حفظ نسخة احتياطية</button><label class="btn ghost" for="restoreIn" style="cursor:pointer">استيراد نسخة</label><input type="file" id="restoreIn" accept=".json,application/json" hidden></div>
     <p class="note" id="lastBackup"></p></div>
 </section>
 </main>
@@ -447,11 +447,21 @@ $('#exportBtn').addEventListener('click',async()=>{
 
 /* ---------- backup ---------- */
 function showLastBackup(){let t='';try{t=localStorage.getItem('modo.lastBackup')||''}catch(_){}const el=$('#lastBackup');if(el)el.textContent=t?'آخر نسخة احتياطية: '+t:'ما نزلت نسخة احتياطية بعد.'}
-$('#backupBtn').addEventListener('click',()=>{const d=todayStr();saveBlob(`modo-backup-${d}.json`,new Blob([JSON.stringify({app:'modo',v:1,at:d,docs:STORE.docs})],{type:'application/json'}));try{localStorage.setItem('modo.lastBackup',d)}catch(_){}showLastBackup()});
+$('#backupBtn').addEventListener('click',async()=>{const d=todayStr();const name=`modo-backup-${d}.json`;
+  const blob=new Blob([JSON.stringify({app:'modo',v:1,at:d,docs:STORE.docs})],{type:'application/json'});
+  try{const f=new File([blob],name,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:name})}else saveBlob(name,blob)}
+  catch(e){if(e&&e.name==='AbortError')return;saveBlob(name,blob)}
+  try{localStorage.setItem('modo.lastBackup',d)}catch(_){}showLastBackup()});
+function mergeDocs(docs){let n=0;for(const [k,v] of Object.entries(docs)){if(!(k in STORE.docs))n++;STORE.docs[k]=v}persist();notify();draft=null;renderAll();return n}
+(async()=>{const h=location.hash;if(!h.startsWith('#import='))return;
+  try{const b64=h.slice(8).replace(/-/g,'+').replace(/_/g,'/');const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+    const txt=await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+    const j=JSON.parse(txt);if(j.app!=='modo'||!j.docs)throw 0;const n=mergeDocs(j.docs);toast('انضافت بيانات '+(j.label||'')+' ✓ ('+n+' سجل)')}
+  catch(_){toast('رابط الاستيراد ما اشتغل')}
+  history.replaceState(null,'',location.pathname)})();
 $('#restoreIn').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
-  try{const j=JSON.parse(await f.text());if(j.app!=='modo'||!j.docs)throw 0;let n=0;
-    for(const [k,v] of Object.entries(j.docs)){if(!(k in STORE.docs))n++;STORE.docs[k]=v}
-    persist();notify();draft=null;renderAll();toast('انضافت '+n+' سجل ✓')}catch(_){toast('هذا مو ملف نسخة احتياطية صحيح')}
+  try{const j=JSON.parse(await f.text());if(j.app!=='modo'||!j.docs)throw 0;const n=mergeDocs(j.docs);toast('انضافت '+n+' سجل ✓')}catch(_){toast('هذا مو ملف نسخة احتياطية صحيح')}
   e.target.value=''});
 showLastBackup();
 
