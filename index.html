@@ -128,6 +128,7 @@ img{max-width:100%}
   <div class="mpick"><button id="mNext" aria-label="الشهر التالي">‹</button><span id="mLabel" class="num"></span><button id="mPrev" aria-label="الشهر السابق">›</button></div>
 </header>
 
+<div id="bkWarn" class="card" hidden style="max-width:640px;margin:0 auto 12px;border-color:var(--out);font-size:14px;line-height:1.7"></div>
 <main>
 <!-- تسجيل -->
 <section id="v-add">
@@ -215,6 +216,7 @@ let unsubTx=null, unsubAtt=null;
 
 /* ---------- local storage db (on this device) ---------- */
 const KEY='modo.db.v1';
+const BK=KEY.replace('.db.v1','.lastBackup');
 let STORE;try{STORE=JSON.parse(localStorage.getItem(KEY)||'null')}catch(_){STORE=null}
 STORE=STORE||{docs:{}};
 const listeners=new Set();
@@ -244,8 +246,10 @@ const TYPES=[
  {k:'partner',label:'شريك'},{k:'loss',label:'خسارة'},{k:'debt',label:'ديون'}];
 const EMP_SUBS=['دفع راتب','سحب','اوردر','خصم','مكافأة'];
 const LOSS_SUBS=['إلغاء','تعويض','ضيافة'];
-let form={k:'in',src:'كاش',cashier:'',who:'',sub:'سحب',dir:'عليه',lsub:'إلغاء',cat:'',ddir:'تسديد',cred:''};
-function allTx(){return Object.entries(STORE.docs).filter(([k])=>k.startsWith('tx/')).map(([k,v])=>({id:k.slice(3),...v}))}
+let form={k:'in',src:'كاش',cashier:'',who:'',sub:'سحب',dir:'عليه',from:'',lsub:'إلغاء',cat:'',ddir:'تسديد',cred:''};
+const PRE_OPTS=['من الدرج قبل الحساب','من فلوس محسوبة'];
+function allTx(){return Object.entries(STORE.docs).filter(([k,v])=>k.startsWith('tx/')&&!v.void).map(([k,v])=>({id:k.slice(3),...v}))}
+const live=()=>txs.filter(t=>!t.void);
 function creditors(){return uniq(allTx().filter(t=>t.k==='debt'||t.k==='dnew').map(t=>t.who))}
 function debtBook(){const b={};for(const t of allTx()){if(t.k!=='debt'&&t.k!=='dnew')continue;const w=t.who||'غير محدد';const x=b[w]||(b[w]={owed:0,paid:0});if(t.k==='dnew')x.owed+=t.amt;else x.paid+=t.amt}return b}
 let expr='';
@@ -266,7 +270,7 @@ function renderFields(){
       f.push(`<div class="row"><label>الكاشير</label>${chipGroup('g2',cfg.cashiers,form.cashier,'cashier')}</div>`);}
   }
   if(k==='exp'){
-    const recent=uniq(txs.filter(t=>t.k==='exp').map(t=>t.note)).slice(-12);
+    const recent=uniq(live().filter(t=>t.k==='exp').map(t=>t.note)).slice(-12);
     f.push(`<div class="row"><label for="fCat">البند</label><input id="fCat" class="grow" list="catList" placeholder="مثلاً: لحم، خبز، غاز" value="${esc(form.cat)}"><datalist id="catList">${recent.map(r=>`<option value="${esc(r)}">`).join('')}</datalist></div>`);
   }
   if(k==='emp'){
@@ -278,7 +282,9 @@ function renderFields(){
     const names=partnerNames(); if(!names.includes(form.who)) form.who=names[0]||'';
     f.push(`<div class="row"><label>الشريك</label>${chipGroup('g5',names,form.who,'who')}</div>`);
     f.push(`<div class="row"><label>النوع</label>${chipGroup('g6',['عليه','له'],form.dir,'dir')}</div>`);
-    f.push(`<p class="note">"عليه": أخذ فلوس أو أوردر من المطعم، تنخصم من حصته. "له": حط فلوس بالمطعم، تنضاف لحصته.</p>`);
+    if(form.dir==='عليه'){f.push(`<div class="row"><label>منين</label>${chipGroup('g6b',PRE_OPTS,form.from,'from')}</div>`);
+      f.push(`<p class="note"><b>من الدرج قبل الحساب</b>: أخذها قبل لا تسجّل وارد اليوم (أو أخذ أوردر)، فهي بيع ما مسجّل وتنحسب بالربح. <b>من فلوس محسوبة</b>: الوارد مسجّل كامل وبعدين أخذ، فما تغيّر الربح.</p>`)}
+    f.push(`<p class="note">"عليه": أخذ فلوس أو أوردر من المطعم، تنخصم من حصته. "له": حط فلوس بالمطعم، تنضاف لحصته. سحب الشريك ما ينقص الربح، ينقص حصته بس.</p>`);
   }
   if(k==='debt'){
     f.push(`<div class="row"><label>النوع</label>${chipGroup('g8',['تسديد','دين جديد'],form.ddir,'ddir')}</div>`);
@@ -308,7 +314,9 @@ $('#keys').addEventListener('click',e=>{const b=e.target.closest('[data-key]');i
   else expr+=k;
   renderDisp()});
 
+let saving=false,lastSave={sig:'',at:0};
 async function save(){
+  if(saving)return;
   const amt=evalExpr(expr); if(!(amt>0)){toast('اكتب المبلغ أول');return}
   const d=$('#fDate').value||todayStr(); if(MIN_DATE&&d<MIN_DATE){toast('ما يصير تسجل قبل '+MIN_DATE+'، سجلها بالبرنامج الأول');return}
   const note=$('#fNote').value.trim();
@@ -316,12 +324,15 @@ async function save(){
   if(form.k==='in'){r.src=form.src;r.cashier=form.cashier||'';const a=cfg.apps.find(x=>x.name===form.src);r.fee=a?(+a.fee||0):0}
   if(form.k==='exp'){if(!form.cat.trim()){toast('اكتب اسم البند');return}r.note=form.cat.trim()+(note?' – '+note:'')}
   if(form.k==='emp'){if(!form.who){toast('ضيف الموظفين من الإعدادات');return}r.who=form.who;r.sub=form.sub}
-  if(form.k==='partner'){if(!form.who){toast('ضيف الشركاء من الإعدادات');return}r.who=form.who;r.dir=form.dir}
+  if(form.k==='partner'){if(!form.who){toast('ضيف الشركاء من الإعدادات');return}r.who=form.who;r.dir=form.dir;if(form.dir==='عليه'){if(!PRE_OPTS.includes(form.from)){toast('اختار: من الدرج قبل الحساب، لو من فلوس محسوبة');return}r.pre=form.from===PRE_OPTS[0]}}
   if(form.k==='loss'){r.sub=form.lsub}
   if(form.k==='debt'){const w=(form.cred||'').trim();if(!w){toast('اختار أو اكتب اسم الجهة');return}r.who=w;if(form.ddir==='دين جديد')r.k='dnew'}
   if(!db){toast('ما متصل، جرّب بعد شوية');return}
-  try{await db.collection('tx').add(r);expr='';$('#fNote').value='';if(form.k==='exp'){form.cat='';renderFields()}renderDisp();toast('انحفظ ✓')}
+  const sig=JSON.stringify({...r,ts:0});if(sig===lastSave.sig&&Date.now()-lastSave.at<4000){toast('انحفظت قبل ثواني، ما كررتها');return}
+  saving=true;
+  try{await db.collection('tx').add(r);lastSave={sig,at:Date.now()};if(form.k==='partner')form.from='';expr='';$('#fNote').value='';if(form.k==='exp'){form.cat='';renderFields()}renderDisp();toast('انحفظ ✓')}
   catch(e){toast(e.code==='invalid_argument'?'ما عندك صلاحية تسجيل':'ما انحفظ، جرّب مرة ثانية')}
+  finally{saving=false}
 }
 const MIN_DATE='';
 function clampDate(d){return MIN_DATE&&d<MIN_DATE?MIN_DATE:d}
@@ -337,7 +348,7 @@ function desc(t){
     case 'in':return {title:'وارد · '+(t.src||''),sub:t.cashier||'',cls:'in'};
     case 'exp':return {title:t.note||'مصروف',sub:'مصروف',cls:'out'};
     case 'emp':return {title:(t.who||'')+' · '+(t.sub||''),sub:t.note||'',cls:'out'};
-    case 'partner':return {title:(t.who||'')+' · '+(t.dir||'عليه'),sub:t.note||'',cls:t.dir==='له'?'in':'out'};
+    case 'partner':return {title:(t.who||'')+' · '+(t.dir||'عليه'),sub:(t.dir!=='له'?(isPre(t)?'من الدرج قبل الحساب (تنحسب بيع)':'من فلوس محسوبة (ما تغيّر الربح)')+(t.note?' · ':''):'')+(t.note||''),cls:t.dir==='له'?'in':'out'};
     case 'loss':return {title:'خسارة · '+(t.sub||''),sub:t.note||'',cls:'out'};
     case 'debt':return {title:'تسديد دين · '+(t.who||''),sub:t.note||'',cls:'out'};
     case 'dnew':return {title:'دين جديد · '+(t.who||''),sub:t.note||'ما ينحسب من الربح',cls:''};
@@ -346,18 +357,28 @@ function desc(t){
 function renderDay(){
   const d=$('#fDate').value||todayStr();
   $('#dateNice').textContent=niceDate(d);
-  const list=txs.filter(t=>t.d===d).sort((a,b)=>(b.ts||0)-(a.ts||0));
-  const net=list.reduce((s,t)=>s+(t.k==='in'?t.amt*(1-(t.fee||0)/100):0),0);
-  const out=list.reduce((s,t)=>s+(t.k==='exp'||t.k==='loss'||t.k==='debt'?t.amt:0),0);
+  const all=txs.filter(t=>t.d===d).sort((a,b)=>(b.ts||0)-(a.ts||0)),list=all.filter(t=>!t.void),gone=all.filter(t=>t.void);
+  const net=list.reduce((s,t)=>s+eff(t).sale,0);
+  const out=list.reduce((s,t)=>s+eff(t).cost,0);
   $('#dayTitle').innerHTML=`تسجيلات <span class="num">${d}</span> — وارد صافي <span class="num in">${fmt(net)}</span> · مصاريف <span class="num out">${fmt(out)}</span>`;
-  $('#dayList').innerHTML=list.length?list.map(t=>{const x=desc(t);return `<div class="it"><div class="t">${esc(x.title)}${t.note&&t.k!=='exp'?'':''}<small>${esc(x.sub)}</small></div><div class="a num ${x.cls}">${fmt(t.amt)}</div><button class="x" data-del="${t.id}" aria-label="حذف">×</button></div>`}).join(''):'<div class="empty">ما كو تسجيلات بهذا اليوم بعد. اختار النوع واكتب المبلغ واضغط حفظ.</div>';
+  $('#dayList').innerHTML=(list.length?list.map(t=>{const x=desc(t);return `<div class="it"><div class="t">${esc(x.title)}${t.note&&t.k!=='exp'?'':''}<small>${esc(x.sub)}</small></div><div class="a num ${x.cls}">${fmt(t.amt)}</div>${t.k==='partner'&&t.dir!=='له'?`<button class="x" data-pre="${t.id}" title="تغيير: من الدرج / من المحسوب" aria-label="تغيير مصدر السحب">⇄</button>`:''}<button class="x" data-del="${t.id}" aria-label="إلغاء">×</button></div>`}).join(''):'<div class="empty">ما كو تسجيلات بهذا اليوم بعد. اختار النوع واكتب المبلغ واضغط حفظ.</div>')+
+    (gone.length?`<h3 style="margin:12px 0 4px">ملغية (ما تنحسب)</h3>`+gone.map(t=>{const x=desc(t);return `<div class="it" style="opacity:.55"><div class="t"><s>${esc(x.title)}</s><small>انلغت ${t.voidAt?new Date(t.voidAt).toLocaleString('en-GB'):''}</small></div><div class="a num"><s>${fmt(t.amt)}</s></div><button class="btn ghost" data-undo="${t.id}">رجّعها</button></div>`}).join(''):'');
 }
 let pendingDel=null;
 $('#dayList').addEventListener('click',async e=>{const b=e.target.closest('[data-del]');if(!b)return;
-  if(pendingDel!==b.dataset.del){pendingDel=b.dataset.del;b.textContent='؟';b.style.color='var(--out)';toast('اضغط مرة ثانية للحذف');return}
-  try{await db.collection('tx').doc(b.dataset.del).delete();toast('انحذف')}catch(e){toast('ما انحذف')} pendingDel=null});
+  if(pendingDel!==b.dataset.del){pendingDel=b.dataset.del;b.textContent='؟';b.style.color='var(--out)';toast('اضغط مرة ثانية للإلغاء');return}
+  await patchTx(b.dataset.del,{void:true,voidAt:Date.now()},'انلغت، وتكدر ترجعها من تحت'); pendingDel=null});
+async function patchTx(id,p,msg){const cur=STORE.docs['tx/'+id];if(!cur)return;try{await db.collection('tx').doc(id).set({...cur,...p});toast(msg)}catch(e){toast('ما انحفظ')}}
+$('#dayList').addEventListener('click',async e=>{const u=e.target.closest('[data-undo]');if(u){const cur=STORE.docs['tx/'+u.dataset.undo];if(!cur)return;const c={...cur};delete c.void;delete c.voidAt;try{await db.collection('tx').doc(u.dataset.undo).set(c);toast('رجعت ✓')}catch(_){toast('ما رجعت')}return}
+  const p=e.target.closest('[data-pre]');if(!p)return;const t=txs.find(x=>x.id===p.dataset.pre);if(!t)return;const nowPre=isPre(t);
+  if(!confirm(`${t.who} أخذ ${fmt(t.amt)}\n\nهسة: ${nowPre?PRE_OPTS[0]:PRE_OPTS[1]}\nأغيّرها إلى: ${nowPre?PRE_OPTS[1]:PRE_OPTS[0]}؟`))return;
+  await patchTx(t.id,{pre:!nowPre},'تغيّرت ✓')});
 
 /* ---------- calculations ---------- */
+// partner took money/food BEFORE the day's sales were recorded = unrecorded sale. Old records (no flag) keep the old behaviour.
+const isPre=t=>t.k==='partner'&&t.dir!=='له'&&t.pre!==false;
+const COSTK=t=>t.k==='exp'||t.k==='loss'||t.k==='debt'||(t.k==='emp'&&(t.sub==='دفع راتب'||t.sub==='سحب'));
+function eff(t){if(t.void)return{sale:0,cost:0};if(t.k==='in')return{sale:t.amt*(1-(t.fee||0)/100),cost:0};if(isPre(t))return{sale:t.amt,cost:0};if(COSTK(t))return{sale:0,cost:t.amt};return{sale:0,cost:0}}
 function rateOn(emp,dateStr){
   const h=(emp.hist||[]).slice().sort((a,b)=>a.from<b.from?-1:1);let s=0;
   for(const x of h){if(x.from<=dateStr)s=+x.salary||0}
@@ -370,7 +391,7 @@ function salaries(){
   for(const e of cfg.emps){
     const a=am[e.name]||{};let days=0,earned=0;
     for(const [d,c] of Object.entries(a)){if(c===1||c===3){days++;earned+=rateOn(e,month+'-'+pad(d))}}
-    const sum=s=>txs.filter(t=>t.k==='emp'&&t.who===e.name&&t.sub===s).reduce((x,t)=>x+t.amt,0);
+    const sum=s=>live().filter(t=>t.k==='emp'&&t.who===e.name&&t.sub===s).reduce((x,t)=>x+t.amt,0);
     const r={name:e.name,days,earned,bonus:sum('مكافأة'),orders:sum('اوردر'),ded:sum('خصم'),draw:sum('سحب'),paid:sum('دفع راتب'),off:e.off};
     r.left=r.earned+r.bonus-r.orders-r.ded-r.draw-r.paid;
     if(!e.off||days||r.paid||r.draw)rows.push(r);
@@ -378,8 +399,8 @@ function salaries(){
   return rows;
 }
 function totals(){
-  const T={gross:0,net:0,bySrc:{},byCash:{},exp:0,loss:0,debt:0,paid:0,draw:0,pOn:{},pFor:{}};
-  for(const t of txs){
+  const T={gross:0,net:0,pre:0,bySrc:{},byCash:{},exp:0,loss:0,debt:0,paid:0,draw:0,pOn:{},pFor:{}};
+  for(const t of live()){
     if(t.k==='in'){const n=t.amt*(1-(t.fee||0)/100);T.gross+=t.amt;T.net+=n;
       const s=T.bySrc[t.src]||(T.bySrc[t.src]={g:0,n:0});s.g+=t.amt;s.n+=n;
       const c=t.cashier||'غير محدد';T.byCash[c]=(T.byCash[c]||0)+t.amt}
@@ -388,20 +409,17 @@ function totals(){
     if(t.k==='debt')T.debt+=t.amt;
     if(t.k==='emp'&&t.sub==='دفع راتب')T.paid+=t.amt;
     if(t.k==='emp'&&t.sub==='سحب')T.draw+=t.amt;
-    if(t.k==='partner'){const o=t.dir==='له'?T.pFor:T.pOn;o[t.who]=(o[t.who]||0)+t.amt}
+    if(t.k==='partner'){const o=t.dir==='له'?T.pFor:T.pOn;o[t.who]=(o[t.who]||0)+t.amt;if(isPre(t))T.pre+=t.amt}
   }
   T.partnerOn=Object.values(T.pOn).reduce((a,b)=>a+b,0);
   T.sal=T.paid+T.draw;
-  T.profit=T.net+T.partnerOn-T.exp-T.sal-T.loss-T.debt;
+  T.profit=T.net+T.pre-T.exp-T.sal-T.loss-T.debt;
   // profit per share period
   const sh=getShares(),mStart=month+'-01',mEnd=month+'-'+pad(daysIn(month));
   T.periods=[];
   sh.forEach((p,i)=>{const nx=sh[i+1];const a=p.from>mStart?p.from:mStart;const b0=nx?addDays(nx.from,-1):mEnd;const b=b0<mEnd?b0:mEnd;
     if(a>b)return;let pr=0;
-    for(const t of txs){if(t.d<a||t.d>b)continue;
-      if(t.k==='in')pr+=t.amt*(1-(t.fee||0)/100);
-      else if(t.k==='partner'){if(t.dir!=='له')pr+=t.amt}
-      else if(t.k==='exp'||t.k==='loss'||t.k==='debt'||(t.k==='emp'&&(t.sub==='دفع راتب'||t.sub==='سحب')))pr-=t.amt}
+    for(const t of live()){if(t.d<a||t.d>b)continue;const x=eff(t);pr+=x.sale-x.cost}
     T.periods.push({a,b,profit:pr,parts:p.parts})});
   if(!T.periods.length)T.periods.push({a:mStart,b:mEnd,profit:T.profit,parts:[]});
   T.shareOf={};for(const P of T.periods)for(const x of P.parts)T.shareOf[x.name]=(T.shareOf[x.name]||0)+P.profit*(+x.pct||0)/100;
@@ -414,9 +432,10 @@ function renderMonth(){
      :'<div class="empty">ما كو ديون مسجلة. سجّلها من "تسجيل" ← ديون ← دين جديد.</div>'}
   const T=totals();
   $('#netProfit').textContent=fmt(T.profit);
-  $('#netNote').textContent=`الوارد الصافي ${fmt(T.net)} + سحوبات الشركاء ${fmt(T.partnerOn)} − المصاريف ${fmt(T.exp)} − الرواتب ${fmt(T.sal)} − الخسائر ${fmt(T.loss)} − الديون ${fmt(T.debt)}`;
+  $('#netNote').textContent=`الوارد الصافي ${fmt(T.net)}${T.pre?` + أخذه شريك من الدرج قبل الحساب ${fmt(T.pre)}`:''} − المصاريف ${fmt(T.exp)} − الرواتب ${fmt(T.sal)} − الخسائر ${fmt(T.loss)} − تسديد ديون ${fmt(T.debt)}. سحوبات الشركاء ما تنقص الربح، تنخصم من حصصهم.`;
   $('#incBox').innerHTML=Object.entries(T.bySrc).map(([s,v])=>kv(esc(s),v.g===v.n?fmt(v.g):`${fmt(v.g)} ← ${fmt(v.n)}`)).join('')+
-    kv('إجمالي الوارد (قبل العمولة)',fmt(T.gross))+kv('الصافي بعد العمولات',fmt(T.net),'big');
+    kv('إجمالي الوارد (قبل العمولة)',fmt(T.gross))+kv('الصافي بعد العمولات',fmt(T.net),'big')+
+    (T.pre?kv('+ أخذه شريك من الدرج قبل الحساب',fmt(T.pre))+kv('مجموع البيع الصافي',fmt(T.net+T.pre),'big'):'');
   $('#cashBox').innerHTML=Object.keys(T.byCash).length?Object.entries(T.byCash).map(([c,v])=>kv(esc(c),fmt(v))).join(''):'<div class="empty">ما كو وارد بعد</div>';
   const S=salaries();const left=S.reduce((a,r)=>a+Math.max(0,r.left),0);
   $('#expBox').innerHTML=kv('مصاريف البضاعة والتشغيل',fmt(T.exp))+kv('رواتب مدفوعة',fmt(T.paid))+kv('سحوبات العمال',fmt(T.draw))+
@@ -432,9 +451,9 @@ function renderMonth(){
       kv('حصته من الربح',fmt(sh))+kv('أخذ (عليه)',fmt(on))+kv('حط (له)',fmt(fo))+kv('الباقي إله',fmt(sh-on+fo),'big')+'</div>'}).join('')+
     (T.periods.length===1&&T.periods[0].parts.length?`<p class="note">النسب: ${T.periods[0].parts.map(x=>esc(x.name)+' '+(+x.pct||0)+'%').join('، ')}</p>`:'');
   // days table
-  const n=daysIn(month);let h='<tr><th>اليوم</th><th>وارد صافي</th><th>مصاريف</th><th>صافي</th></tr>';
+  const n=daysIn(month);let h='<tr><th>اليوم</th><th>وارد صافي</th><th>مصاريف ورواتب</th><th>صافي</th></tr>';
   for(let i=1;i<=n;i++){const d=month+'-'+pad(i);let inn=0,ex=0;
-    for(const t of txs){if(t.d!==d)continue;if(t.k==='in')inn+=t.amt*(1-(t.fee||0)/100);if(t.k==='exp'||t.k==='loss'||t.k==='debt')ex+=t.amt}
+    for(const t of live()){if(t.d!==d)continue;const x=eff(t);inn+=x.sale;ex+=x.cost}
     if(!inn&&!ex){h+=`<tr><td class="num">${i}</td><td colspan="3" style="color:var(--muted)">—</td></tr>`;continue}
     h+=`<tr><td class="num">${i}</td><td class="num in">${fmt(inn)}</td><td class="num out">${fmt(ex)}</td><td class="num"><b>${fmt(inn-ex)}</b></td></tr>`}
   $('#daysTbl').innerHTML=h;
@@ -504,13 +523,14 @@ $('#saveSet').addEventListener('click',async()=>{if(!db)return;
 $('#exportBtn').addEventListener('click',async()=>{
   const head=['التاريخ','النوع','المصدر/البند','الكاشير','الاسم','التفصيل','المبلغ','العمولة%','الصافي','ملاحظة'];
   const kn={in:'وارد',exp:'مصروف',emp:'عامل',partner:'شريك',loss:'خسارة',debt:'تسديد دين',dnew:'دين جديد'};
-  const rows=txs.slice().sort((a,b)=>a.d<b.d?-1:1).map(t=>[t.d,kn[t.k],t.k==='in'?t.src:t.k==='exp'?t.note:'',t.cashier||'',t.who||'',t.sub||t.dir||'',t.amt,t.fee||'',t.k==='in'?Math.round(t.amt*(1-(t.fee||0)/100)):'',t.k==='exp'?'':t.note||'']);
+  const rows=live().sort((a,b)=>a.d<b.d?-1:1).map(t=>[t.d,kn[t.k],t.k==='in'?t.src:t.k==='exp'?t.note:'',t.cashier||'',t.who||'',(t.sub||t.dir||'')+(t.k==='partner'&&t.dir!=='له'?(isPre(t)?' (من الدرج قبل الحساب)':' (من المحسوب)'):''),t.amt,t.fee||'',t.k==='in'?Math.round(t.amt*(1-(t.fee||0)/100)):'',t.k==='exp'?'':t.note||'']);
   const csv='﻿'+[head,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
   saveBlob(`modo-${month}.csv`,new Blob([csv],{type:'text/csv'}))
 });
 
 /* ---------- backup ---------- */
-function showLastBackup(){let t='';try{t=localStorage.getItem('modo.lastBackup')||''}catch(_){}const el=$('#lastBackup');if(el)el.textContent=t?'آخر نسخة احتياطية: '+t:'ما نزلت نسخة احتياطية بعد.'}
+function backupAge(){let t='';try{t=localStorage.getItem(BK)||''}catch(_){}if(!t)return 999;return Math.round((new Date(todayStr())-new Date(t))/864e5)}
+function showLastBackup(){const a=backupAge(),w=$('#bkWarn');if(w){w.hidden=a<7;w.innerHTML=a>=999?'⚠️ ما نزّلت نسخة احتياطية أبداً. إذا انمسح الموبايل تضيع كل الحسابات. <button class="btn" id="bkNow">نزّل نسخة هسة</button>':'⚠️ آخر نسخة احتياطية قبل '+a+' يوم. <button class="btn" id="bkNow">نزّل نسخة هسة</button>';const b=$('#bkNow');if(b)b.onclick=()=>$('#backupBtn').click()}let t='';try{t=localStorage.getItem(BK)||''}catch(_){}const el=$('#lastBackup');if(el)el.textContent=t?'آخر نسخة احتياطية: '+t:'ما نزلت نسخة احتياطية بعد.'}
 $('#backupBtn').addEventListener('click',async()=>{const d=todayStr();const name=`modo-backup-${d}.json`;
   const blob=new Blob([JSON.stringify({app:'modo',v:1,at:d,docs:STORE.docs})],{type:'application/json'});
   try{const f=new File([blob],name,{type:'application/json'});
